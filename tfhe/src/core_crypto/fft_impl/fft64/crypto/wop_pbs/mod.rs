@@ -736,6 +736,109 @@ pub fn circuit_bootstrap_boolean_vertical_packing<Scalar: UnsignedTorus + CastIn
     }
 }
 
+#[allow(unused_variables)]
+pub fn circuit_bootstrap_boolean_vertical_packing_modified<Scalar: UnsignedTorus + CastInto<usize>>(
+    big_lut_as_polynomial_list: PolynomialList<&[Scalar]>,
+    fourier_bsk_lvl1: FourierLweBootstrapKeyView<'_>,
+    fourier_bsk_lvl2: FourierLweBootstrapKeyView<'_>,
+    mut lwe_list_out: LweCiphertextList<&mut [Scalar]>,
+    lwe_list_in: LweCiphertextList<&[Scalar]>,
+    pfpksk_list: LwePrivateFunctionalPackingKeyswitchKeyList<&[Scalar]>,
+    level_cbs: DecompositionLevelCount,
+    base_log_cbs: DecompositionBaseLog,
+    fft_lvl1: FftView<'_>,
+    fft_lvl2: FftView<'_>,
+    stack: &mut PodStack,
+) {
+    println!("[QWQ] Entered modified CBVP");
+
+    // Skip the checks for experimentation
+    // debug_assert!(stack.can_hold(
+    //     circuit_bootstrap_boolean_vertical_packing_scratch::<Scalar>(
+    //         lwe_list_in.lwe_ciphertext_count(),
+    //         lwe_list_out.lwe_ciphertext_count(),
+    //         lwe_list_in.lwe_size(),
+    //         big_lut_as_polynomial_list.polynomial_count(),
+    //         fourier_bsk.output_lwe_dimension().to_lwe_size(),
+    //         fourier_bsk.glwe_size(),
+    //         pfpksk_list.output_polynomial_size(),
+    //         level_cbs,
+    //         fft
+    //     )
+    //     .unwrap()
+    // ));
+    // debug_assert!(
+    //     lwe_list_out.lwe_size().to_lwe_dimension() == fourier_bsk.output_lwe_dimension(),
+    //     "Output LWE ciphertext needs to have an LweDimension of {}, got {}",
+    //     lwe_list_out.lwe_size().to_lwe_dimension().0,
+    //     fourier_bsk.output_lwe_dimension().0
+    // );
+    // debug_assert!(lwe_list_out.ciphertext_modulus() == lwe_list_in.ciphertext_modulus());
+    // debug_assert!(lwe_list_in.ciphertext_modulus() == pfpksk_list.ciphertext_modulus());
+    // debug_assert!(
+    //     pfpksk_list.ciphertext_modulus().is_native_modulus(),
+    //     "This operation currently only supports native moduli"
+    // );
+
+    let glwe_size = pfpksk_list.output_key_glwe_dimension().to_glwe_size();
+    let (ggsw_list_data, stack) = stack.make_aligned_with(
+        lwe_list_in.lwe_ciphertext_count().0 * pfpksk_list.output_polynomial_size().0 / 2
+            * glwe_size.0
+            * glwe_size.0
+            * level_cbs.0,
+        CACHELINE_ALIGN,
+        |_| c64::default(),
+    );
+    let (ggsw_res_data, stack) = stack.make_aligned_with(
+        pfpksk_list.output_polynomial_size().0 * glwe_size.0 * glwe_size.0 * level_cbs.0,
+        CACHELINE_ALIGN,
+        |_| Scalar::ZERO,
+    );
+
+    let mut ggsw_list = FourierGgswCiphertextListMutView::new(
+        ggsw_list_data,
+        lwe_list_in.lwe_ciphertext_count().0,
+        glwe_size,
+        pfpksk_list.output_polynomial_size(),
+        base_log_cbs,
+        level_cbs,
+    );
+
+    let mut ggsw_res = GgswCiphertext::from_container(
+        ggsw_res_data,
+        glwe_size,
+        pfpksk_list.output_polynomial_size(),
+        base_log_cbs,
+        pfpksk_list.ciphertext_modulus(),
+    );
+
+    for (lwe_in, ggsw) in izip_eq!(lwe_list_in.iter(), ggsw_list.as_mut_view().into_ggsw_iter()) {
+        circuit_bootstrap_boolean(
+            fourier_bsk_lvl2,
+            lwe_in,
+            ggsw_res.as_mut_view(),
+            DeltaLog(Scalar::BITS - 1),
+            pfpksk_list.as_view(),
+            fft_lvl2,
+            stack,
+        );
+
+        ggsw.fill_with_forward_fourier(ggsw_res.as_view(), fft_lvl1, stack);
+    }
+
+    // We deduce the number of luts in the vec_lut from the number of cipherxtexts in lwe_list_out
+    let number_of_luts = lwe_list_out.lwe_ciphertext_count().0;
+
+    let small_lut_size = big_lut_as_polynomial_list.polynomial_count().0 / number_of_luts;
+
+    for (lut, lwe_out) in izip_eq!(
+        big_lut_as_polynomial_list.chunks_exact(small_lut_size),
+        lwe_list_out.iter_mut(),
+    ) {
+        vertical_packing(lut, lwe_out, ggsw_list.as_view(), fft_lvl1, stack);
+    }
+}
+
 pub fn vertical_packing_scratch<Scalar>(
     glwe_size: GlweSize,
     polynomial_size: PolynomialSize,

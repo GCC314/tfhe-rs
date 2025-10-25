@@ -9,6 +9,7 @@ use crate::core_crypto::entities::*;
 use crate::core_crypto::fft_impl::fft64::crypto::wop_pbs::{
     circuit_bootstrap_boolean_vertical_packing, circuit_bootstrap_boolean_vertical_packing_scratch,
     extract_bits, extract_bits_scratch,
+    circuit_bootstrap_boolean_vertical_packing_modified, // added modified variant
 };
 use crate::core_crypto::fft_impl::fft64::math::fft::FftView;
 use dyn_stack::{PodStack, SizeOverflow, StackReq};
@@ -692,6 +693,64 @@ pub fn circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimi
         level_cbs,
         base_log_cbs,
         fft,
+        stack,
+    );
+}
+
+/// A variant of of [`circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimized`],
+/// where two different Fourier bootstrap keys are used for the circuit bootstrap operation.
+pub fn circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimized_modified<
+    Scalar,
+    InputCont,
+    OutputCont,
+    LutCont,
+    BskCont,
+    PFPKSKCont,
+>(
+    lwe_list_in: &LweCiphertextList<InputCont>,
+    lwe_list_out: &mut LweCiphertextList<OutputCont>,
+    big_lut_as_polynomial_list: &PolynomialList<LutCont>,
+    fourier_bsk_lvl1: &FourierLweBootstrapKey<BskCont>,
+    fourier_bsk_lvl2: &FourierLweBootstrapKey<BskCont>,
+    pfpksk_list: &LwePrivateFunctionalPackingKeyswitchKeyList<PFPKSKCont>,
+    base_log_cbs: DecompositionBaseLog,
+    level_cbs: DecompositionLevelCount,
+    fft_lvl1: FftView<'_>,
+    fft_lvl2: FftView<'_>,
+    stack: &mut PodStack,
+) where
+    // CastInto required for PBS modulus switch which returns a usize
+    Scalar: UnsignedTorus + CastInto<usize>,
+    InputCont: Container<Element = Scalar>,
+    OutputCont: ContainerMut<Element = Scalar>,
+    LutCont: Container<Element = Scalar>,
+    BskCont: Container<Element = c64>,
+    PFPKSKCont: Container<Element = Scalar>,
+{
+    assert_eq!(
+        lwe_list_out.ciphertext_modulus(),
+        lwe_list_in.ciphertext_modulus()
+    );
+    assert_eq!(
+        lwe_list_in.ciphertext_modulus(),
+        pfpksk_list.ciphertext_modulus()
+    );
+    assert!(
+        pfpksk_list.ciphertext_modulus().is_native_modulus(),
+        "This operation currently only supports native moduli"
+    );
+
+    circuit_bootstrap_boolean_vertical_packing_modified(
+        big_lut_as_polynomial_list.as_view(),
+        fourier_bsk_lvl1.as_view(),
+        fourier_bsk_lvl2.as_view(),
+        lwe_list_out.as_mut_view(),
+        lwe_list_in.as_view(),
+        pfpksk_list.as_view(),
+        level_cbs,
+        base_log_cbs,
+        fft_lvl1,
+        fft_lvl2,
         stack,
     );
 }
