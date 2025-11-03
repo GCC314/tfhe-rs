@@ -750,7 +750,7 @@ pub fn circuit_bootstrap_boolean_vertical_packing_modified<Scalar: UnsignedTorus
     fft_lvl2: FftView<'_>,
     stack: &mut PodStack,
 ) {
-    println!("[QWQ] Entered modified CBVP");
+    // println!("[QWQ] Entered modified CBVP");
 
     // Skip the checks for experimentation
     // debug_assert!(stack.can_hold(
